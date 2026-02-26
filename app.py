@@ -39,6 +39,24 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# -- Fetching images 
+@st.cache_data
+def fetch_map_image(map_name: str):
+    """Fetch map radar image with Streamlit's network access."""
+    urls = [
+        f"https://radar-overviews.cs2.app/{map_name}.png",
+        f"https://raw.githubusercontent.com/zifnab87/cs-go-map-images/master/{map_name}.png",
+        f"https://cdn.rawgit.com/zifnab87/cs-go-map-images/master/{map_name}.png",
+    ]
+    for url in urls:
+        try:
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                return resp.content
+        except Exception:
+            continue
+    return None
+
 
 # ── Parsing & Stats ───────────────────────────────────────────────────────────
 @st.cache_data
@@ -717,11 +735,13 @@ if uploaded:
                      help="Nuke only — upper/lower refer to Z level. Use 'both' for other maps.")
 
     with st.spinner("Building heatmap..."):
+        map_img_bytes = fetch_map_image(map_name)
         fig_hm = build_position_heatmap(
             pos_df, kills_df, map_name,
             mode=hm_mode,
             player_filter=player_filter,
             floor_filter=floor,
+            map_img_bytes=map_img_bytes,
         )
 
     if fig_hm:

@@ -1,199 +1,150 @@
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import requests
 from PIL import Image
 import io
 import base64
 
-# ── de_nuke map calibration ───────────────────────────────────────────────────
-# These values come from Valve's radar .txt files
+# ── Map calibration data ──────────────────────────────────────────────────────
 MAP_DATA = {
-    "de_nuke": {
-        "pos_x": -3453,   # top-left X in game units
-        "pos_y": 2887,    # top-left Y in game units
-        "scale": 7.0,     # game units per pixel
-        # Nuke has two levels — upper (Z > -100) and lower (Z <= -100)
-        "upper_z": -100,
-        "radar_url": "https://raw.githubusercontent.com/zifnab87/cs-go-map-images/master/de_nuke.png",
-    },
-    # Add more maps here as needed
-    "de_mirage": {
-        "pos_x": -3230, "pos_y": 1713, "scale": 5.0,
-        "radar_url": "https://raw.githubusercontent.com/zifnab87/cs-go-map-images/master/de_mirage.png",
-    },
-    "de_inferno": {
-        "pos_x": -2087, "pos_y": 3870, "scale": 4.9,
-        "radar_url": "https://raw.githubusercontent.com/zifnab87/cs-go-map-images/master/de_inferno.png",
-    },
-    "de_dust2": {
-        "pos_x": -2476, "pos_y": 3239, "scale": 4.4,
-        "radar_url": "https://raw.githubusercontent.com/zifnab87/cs-go-map-images/master/de_dust2.png",
-    },
-    "de_ancient": {
-        "pos_x": -2953, "pos_y": 2164, "scale": 5.0,
-        "radar_url": "https://raw.githubusercontent.com/zifnab87/cs-go-map-images/master/de_ancient.png",
-    },
-    "de_anubis": {
-        "pos_x": -2796, "pos_y": 3328, "scale": 5.22,
-        "radar_url": "https://raw.githubusercontent.com/zifnab87/cs-go-map-images/master/de_anubis.png",
-    },
-    "de_vertigo": {
-        "pos_x": -3168, "pos_y": 1762, "scale": 4.0,
-        "radar_url": "https://raw.githubusercontent.com/zifnab87/cs-go-map-images/master/de_vertigo.png",
-    },
+    "de_nuke":     {"pos_x": -3453, "pos_y": 2887,  "scale": 7.0,  "upper_z": -100},
+    "de_mirage":   {"pos_x": -3230, "pos_y": 1713,  "scale": 5.0,  "upper_z": None},
+    "de_inferno":  {"pos_x": -2087, "pos_y": 3870,  "scale": 4.9,  "upper_z": None},
+    "de_dust2":    {"pos_x": -2476, "pos_y": 3239,  "scale": 4.4,  "upper_z": None},
+    "de_ancient":  {"pos_x": -2953, "pos_y": 2164,  "scale": 5.0,  "upper_z": None},
+    "de_anubis":   {"pos_x": -2796, "pos_y": 3328,  "scale": 5.22, "upper_z": None},
+    "de_vertigo":  {"pos_x": -3168, "pos_y": 1762,  "scale": 4.0,  "upper_z": None},
+    "de_overpass": {"pos_x": -4831, "pos_y": 1781,  "scale": 5.2,  "upper_z": None},
+    "de_train":    {"pos_x": -2477, "pos_y": 2392,  "scale": 4.7,  "upper_z": None},
 }
 
 
 def game_to_pixel(x, y, map_name):
-    """Convert CS2 game coordinates to pixel coordinates on radar image."""
     m = MAP_DATA.get(map_name, MAP_DATA["de_nuke"])
     px = (x - m["pos_x"]) / m["scale"]
     py = (m["pos_y"] - y) / m["scale"]
     return px, py
 
 
-def get_map_image(map_name: str) -> str:
-    """Fetch radar image and return as base64 string for Plotly."""
-    # Try to use local fallback first
-    m = MAP_DATA.get(map_name)
-    if not m:
-        return None
+def process_map_image(img_bytes):
+    """Convert raw image bytes to base64 string for Plotly."""
     try:
-        resp = requests.get(m["radar_url"], timeout=10)
-        img = Image.open(io.BytesIO(resp.content)).convert("RGBA")
-        # Darken slightly for better contrast with overlays
-        darkened = Image.blend(
-            Image.new("RGBA", img.size, (0, 0, 0, 255)),
-            img, alpha=0.75
-        )
+        img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
+        # Slightly darken for better overlay contrast
+        dark = Image.new("RGBA", img.size, (0, 0, 0, 255))
+        blended = Image.blend(dark, img, alpha=0.75)
         buf = io.BytesIO()
-        darkened.save(buf, format="PNG")
+        blended.save(buf, format="PNG")
         b64 = base64.b64encode(buf.getvalue()).decode()
         return f"data:image/png;base64,{b64}", img.size
     except Exception:
         return None, (1024, 1024)
 
 
-def build_kill_heatmap(kills_df, map_name: str, player_filter=None):
+def get_event_positions(kills_df, pos_df, mode, player_filter=None):
     """
-    Plot kill and death positions on the map radar.
-    kills_df must have: attacker_name, user_name, x, y, z, headshot
-    (x/y/z come from the grenade events — for kills we use player_death directly)
+    For kills/deaths: find the player's nearest sampled position at event tick.
+    Returns a DataFrame with X, Y, Z, name columns.
     """
-    m = MAP_DATA.get(map_name, MAP_DATA["de_nuke"])
-    img_b64, img_size = get_map_image(map_name)
-    W, H = img_size
-
-    df = kills_df[
-        kills_df["attacker_name"].notna() &
-        (kills_df["attacker_name"] != kills_df["user_name"])
-    ].copy()
+    if mode == "deaths":
+        events = kills_df[kills_df["user_name"].notna()][["user_name", "tick"]].copy()
+        events = events.rename(columns={"user_name": "player"})
+    else:  # kills
+        events = kills_df[
+            kills_df["attacker_name"].notna() &
+            (kills_df["attacker_name"] != kills_df["user_name"])
+        ][["attacker_name", "tick"]].copy()
+        events = events.rename(columns={"attacker_name": "player"})
 
     if player_filter:
-        df = df[
-            (df["attacker_name"] == player_filter) |
-            (df["user_name"] == player_filter)
-        ]
+        events = events[events["player"] == player_filter]
 
-    # We don't have X/Y in player_death — we'll use the tick positions
-    # For now build density heatmap from what we have
-    # This function expects pre-joined position data
-    return df, W, H, img_b64
+    if events.empty:
+        return pd.DataFrame()
+
+    positions = []
+    # Build a lookup dict per player for speed
+    player_pos_map = {
+        name: grp.reset_index(drop=True)
+        for name, grp in pos_df.groupby("name")
+    }
+
+    for _, row in events.iterrows():
+        player = row["player"]
+        tick   = row["tick"]
+        player_pos = player_pos_map.get(player)
+        if player_pos is None or player_pos.empty:
+            continue
+        nearest_idx = (player_pos["tick"] - tick).abs().idxmin()
+        nearest = player_pos.loc[nearest_idx]
+        positions.append({
+            "name": player,
+            "X": float(nearest["X"]),
+            "Y": float(nearest["Y"]),
+            "Z": float(nearest["Z"]),
+        })
+
+    return pd.DataFrame(positions)
 
 
 def build_position_heatmap(pos_df, kills_df, map_name: str,
                             mode="deaths", player_filter=None,
-                            floor_filter="upper"):
-    """
-    pos_df: tick-sampled positions with X, Y, Z, name, team_name, is_alive
-    kills_df: player_death events with user_name, attacker_name
-    mode: 'deaths', 'kills', 'positions'
-    floor_filter: 'upper', 'lower', 'both' (nuke-specific)
-    """
-    m = MAP_DATA.get(map_name, MAP_DATA["de_nuke"])
-    img_b64, img_size = get_map_image(map_name)
-    W, H = img_size
+                            floor_filter="both", map_img_bytes=None):
 
-    # ── Select data based on mode ──────────────────────────────────────────
+    m = MAP_DATA.get(map_name, MAP_DATA["de_nuke"])
+
+    # ── Process map image ─────────────────────────────────────────────────
+    if map_img_bytes:
+        img_b64, (W, H) = process_map_image(map_img_bytes)
+    else:
+        img_b64, (W, H) = None, (1024, 1024)
+
+    # ── Get position data ─────────────────────────────────────────────────
     if mode == "positions":
         df = pos_df.copy()
         if player_filter:
             df = df[df["name"] == player_filter]
-        x_col, y_col, z_col = "X", "Y", "Z"
-        title = f"Position Heatmap{' — ' + player_filter if player_filter else ' — All Players'}"
-        color = "rgba(0, 200, 255, 0.6)"
+        # Filter to alive players only — convert to bool safely
+        df = df[df["is_alive"].astype(bool) == True]
+        point_color = "rgba(0, 200, 255, 0.5)"
+        title = f"Position Heatmap — {'All Players' if not player_filter else player_filter}"
 
-    elif mode == "deaths":
-        # Join kill events (which have no X/Y) with position data at closest tick
-        # Use the kills_df user_name + tick to find position
-        death_ticks = kills_df[["user_name", "tick"]].dropna()
-        # Find nearest position tick for each death
-        pos_indexed = pos_df.set_index(["name", "tick"])
-        positions = []
-        for _, row in death_ticks.iterrows():
-            player = row["user_name"]
-            tick   = row["tick"]
-            player_pos = pos_df[pos_df["name"] == player]
-            if player_pos.empty:
-                continue
-            nearest_idx = (player_pos["tick"] - tick).abs().idxmin()
-            nearest = player_pos.loc[nearest_idx]
-            positions.append({"X": nearest["X"], "Y": nearest["Y"],
-                               "Z": nearest["Z"], "name": player})
-        df = pd.DataFrame(positions)
+    elif mode in ("deaths", "kills"):
+        df = get_event_positions(kills_df, pos_df, mode, player_filter)
         if df.empty:
             return None
-        if player_filter:
-            df = df[df["name"] == player_filter]
-        x_col, y_col, z_col = "X", "Y", "Z"
-        title = f"Death Positions{' — ' + player_filter if player_filter else ' — All Players'}"
-        color = "rgba(255, 80, 80, 0.7)"
-
-    elif mode == "kills":
-        kill_ticks = kills_df[["attacker_name", "tick"]].dropna()
-        kill_ticks = kill_ticks[kill_ticks["attacker_name"] != kills_df.get("user_name", "")]
-        positions = []
-        for _, row in kill_ticks.iterrows():
-            player = row["attacker_name"]
-            tick   = row["tick"]
-            player_pos = pos_df[pos_df["name"] == player]
-            if player_pos.empty:
-                continue
-            nearest_idx = (player_pos["tick"] - tick).abs().idxmin()
-            nearest = player_pos.loc[nearest_idx]
-            positions.append({"X": nearest["X"], "Y": nearest["Y"],
-                               "Z": nearest["Z"], "name": player})
-        df = pd.DataFrame(positions)
-        if df.empty:
-            return None
-        if player_filter:
-            df = df[df["name"] == player_filter]
-        x_col, y_col, z_col = "X", "Y", "Z"
-        title = f"Kill Positions{' — ' + player_filter if player_filter else ' — All Players'}"
-        color = "rgba(0, 255, 136, 0.7)"
-
-    # ── Floor filter for Nuke ──────────────────────────────────────────────
-    upper_z = m.get("upper_z", -100)
-    if floor_filter == "upper":
-        df = df[df[z_col] > upper_z]
-        title += " (Upper)"
-    elif floor_filter == "lower":
-        df = df[df[z_col] <= upper_z]
-        title += " (Lower)"
+        point_color = "rgba(255, 80, 80, 0.8)" if mode == "deaths" else "rgba(0, 255, 136, 0.8)"
+        label = "Death" if mode == "deaths" else "Kill"
+        title = f"{label} Positions — {'All Players' if not player_filter else player_filter}"
+    else:
+        return None
 
     if df.empty:
         return None
 
-    # ── Convert to pixel coordinates ──────────────────────────────────────
-    px_coords = [game_to_pixel(x, y, map_name) for x, y in zip(df[x_col], df[y_col])]
-    px = [c[0] for c in px_coords]
-    py = [c[1] for c in px_coords]
+    # ── Floor filter ───────────────────────────────────────────────────────
+    upper_z = m.get("upper_z")
+    if upper_z is not None and floor_filter != "both":
+        if floor_filter == "upper":
+            df = df[df["Z"] > upper_z]
+            title += " (Upper)"
+        elif floor_filter == "lower":
+            df = df[df["Z"] <= upper_z]
+            title += " (Lower)"
+    
+    if df.empty:
+        return None
 
-    # ── Build figure ──────────────────────────────────────────────────────
+    # ── Convert to pixel coordinates ──────────────────────────────────────
+    coords  = [game_to_pixel(x, y, map_name) for x, y in zip(df["X"], df["Y"])]
+    px_list = [c[0] for c in coords]
+    py_list = [c[1] for c in coords]
+    names   = df["name"].tolist() if "name" in df.columns else [""] * len(px_list)
+
+    # ── Build figure ───────────────────────────────────────────────────────
     fig = go.Figure()
 
-    # Background map image
+    # Map background image
     if img_b64:
         fig.add_layout_image(
             source=img_b64,
@@ -202,53 +153,71 @@ def build_position_heatmap(pos_df, kills_df, map_name: str,
             sizex=W, sizey=H,
             sizing="stretch",
             opacity=1.0,
-            layer="below"
+            layer="below",
         )
 
-    # Density heatmap overlay
-    fig.add_trace(go.Histogram2dContour(
-        x=px, y=py,
-        colorscale=[
-            [0.0,  "rgba(0,0,0,0)"],
-            [0.2,  "rgba(0,80,255,0.3)"],
-            [0.5,  "rgba(255,200,0,0.5)"],
-            [0.8,  "rgba(255,80,0,0.65)"],
-            [1.0,  "rgba(255,0,0,0.8)"],
-        ],
-        reversescale=False,
-        showscale=False,
-        ncontours=20,
-        contours=dict(coloring="fill"),
-        line=dict(width=0),
-    ))
+    # Density contour overlay
+    if len(px_list) >= 3:
+        fig.add_trace(go.Histogram2dContour(
+            x=px_list,
+            y=py_list,
+            colorscale=[
+                [0.00, "rgba(0,0,0,0)"],
+                [0.15, "rgba(0,0,180,0.25)"],
+                [0.40, "rgba(0,180,255,0.4)"],
+                [0.65, "rgba(255,200,0,0.55)"],
+                [0.85, "rgba(255,80,0,0.7)"],
+                [1.00, "rgba(255,0,0,0.85)"],
+            ],
+            reversescale=False,
+            showscale=True,
+            colorbar=dict(
+                title=dict(text="Density", font=dict(color="#dce6f0")),
+                tickfont=dict(color="#dce6f0"),
+                bgcolor="#1a2332",
+                bordercolor="#2a3444",
+            ),
+            ncontours=25,
+            contours=dict(coloring="fill"),
+            line=dict(width=0),
+            hoverinfo="skip",
+        ))
 
-    # Individual scatter points
-    hover_text = df["name"].tolist() if "name" in df.columns else [""] * len(px)
+    # Individual event markers
     fig.add_trace(go.Scatter(
-        x=px, y=py,
+        x=px_list,
+        y=py_list,
         mode="markers",
         marker=dict(
             size=8,
-            color=color,
-            line=dict(width=1, color="white"),
+            color=point_color,
+            line=dict(width=1, color="rgba(255,255,255,0.5)"),
         ),
-        text=hover_text,
-        hovertemplate="<b>%{text}</b><br>(%{x:.0f}, %{y:.0f})<extra></extra>",
+        text=names,
+        hovertemplate="<b>%{text}</b><extra></extra>",
         showlegend=False,
     ))
 
     fig.update_layout(
-        title=title,
-        xaxis=dict(range=[0, W], showgrid=False, zeroline=False,
-                   showticklabels=False, scaleanchor="y"),
-        yaxis=dict(range=[H, 0], showgrid=False, zeroline=False,
-                   showticklabels=False),
+        title=dict(text=title, font=dict(color="#dce6f0", size=16)),
+        xaxis=dict(
+            range=[0, W],
+            showgrid=False,
+            zeroline=False,
+            showticklabels=False,
+            scaleanchor="y",
+        ),
+        yaxis=dict(
+            range=[H, 0],
+            showgrid=False,
+            zeroline=False,
+            showticklabels=False,
+        ),
         paper_bgcolor="#0e1117",
         plot_bgcolor="#0e1117",
         font_color="#dce6f0",
-        margin=dict(l=0, r=0, t=40, b=0),
-        height=600,
-        width=600,
+        margin=dict(l=0, r=0, t=44, b=0),
+        height=620,
     )
 
     return fig
