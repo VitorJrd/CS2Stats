@@ -11,6 +11,7 @@ from demoparser2 import DemoParser
 from kast import compute_kast
 from rating import compute_rating
 from round_timeline import build_round_timeline, build_player_round_matrix
+from utility import compute_utility_stats
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -49,6 +50,10 @@ def parse_and_compute(dem_bytes: bytes):
         _, damage_df = parser.parse_events(["player_hurt"])[0]
         _, round_df  = parser.parse_events(["round_end"])[0]
         _, spawn_df  = parser.parse_events(["player_spawn"])[0]
+        _, flash_df   = parser.parse_events(["flashbang_detonate"])[0]
+        _, he_df      = parser.parse_events(["hegrenade_detonate"])[0]
+        _, smoke_df   = parser.parse_events(["smokegrenade_detonate"])[0]
+        _, molotov_df = parser.parse_events(["inferno_startburn"])[0]
     finally:
         try:
             os.unlink(tmp_path)
@@ -88,7 +93,7 @@ def parse_and_compute(dem_bytes: bytes):
     stats["KAST%"]  = stats.index.map(lambda p: kast_pct.get(p, 0.0))
     stats["Rating"] = compute_rating(stats, kills_df, round_df)
 
-    return stats, total_rounds, kills_df, damage_df, round_df, spawn_df
+    return stats, total_rounds, kills_df, damage_df, round_df, spawn_df, flash_df, he_df, smoke_df, molotov_df
 
 
 def rating_color(val):
@@ -240,7 +245,7 @@ uploaded = st.file_uploader("Upload a CS2 demo file (.dem)", type=["dem"])
 
 if uploaded:
     with st.spinner("Parsing demo..."):
-        stats, total_rounds, kills_df, damage_df, round_df, spawn_df = parse_and_compute(uploaded.read())
+        stats, total_rounds, kills_df, damage_df, round_df, spawn_df, flash_df, he_df, smoke_df, molotov_df = parse_and_compute(uploaded.read())
 
     stats_sorted = stats.sort_values("Rating", ascending=False)
 
@@ -384,6 +389,146 @@ if uploaded:
                 )
         else:
             st.info("No kills this round")
+    
+    # ── Utility Stats ──
+    st.markdown("---")
+    st.markdown("### 💣 Utility Stats")
+
+    util, round_util, avg_smokes = compute_utility_stats(
+        flash_df, he_df, smoke_df, molotov_df, damage_df, kills_df, round_df
+    )
+
+    # ── Summary metrics ──
+    ucols = st.columns(4)
+    total_flashes  = int(flash_df.shape[0])
+    total_he       = int(he_df.shape[0])
+    total_smokes   = int(smoke_df.shape[0])
+    total_molotovs = int(molotov_df.shape[0])
+    for col, (label, val) in zip(ucols, [
+        ("Flashbangs Thrown", total_flashes),
+        ("HE Grenades Thrown", total_he),
+        ("Smokes Thrown", total_smokes),
+        ("Molotovs Thrown", total_molotovs),
+    ]):
+        col.metric(label, val)
+
+    # ── Per-player utility table ──
+    st.markdown("#### Per-Player Utility Breakdown")
+
+    util_display = util.copy()
+    util_display.index.name = "Player"
+    util_display = util_display.rename(columns={
+        "flashes_thrown":    "Flashes",
+        "flash_assists":     "Flash Assists",
+        "flash_assist_rate": "Assist/Flash",
+        "he_thrown":         "HEs",
+        "he_damage":         "HE DMG",
+        "he_dmg_per_nade":   "HE DMG/Nade",
+        "smokes_thrown":     "Smokes",
+        "molotovs_thrown":   "Molotovs",
+        "molotov_damage":    "Molotov DMG",
+    })
+
+    # Sort by total utility thrown
+    util_display["Total Thrown"] = (
+        util_display["Flashes"] + util_display["HEs"] +
+        util_display["Smokes"] + util_display["Molotovs"]
+    )
+    util_display = util_display.sort_values("Total Thrown", ascending=False).drop(columns="Total Thrown")
+    st.dataframe(util_display, use_container_width=True)
+
+    # ── Grenade usage bar chart ──
+    st.markdown("#### Grenade Usage by Player")
+    nade_fig = go.Figure()
+    for col, color, label in [
+        ("Flashes",  "#4a90d9", "Flashbangs"),
+        ("HEs",      "#ff6b35", "HE Grenades"),
+        ("Smokes",   "#8b9cbe", "Smokes"),
+        ("Molotovs", "#ff4444", "Molotovs"),
+    ]:
+        nade_fig.add_trace(go.Bar(
+            name=label,
+            x=util_display.index.tolist(),
+            y=util_display[col].tolist(),
+            marker_color=color,
+        ))
+    nade_fig.update_layout(
+        barmode="stack",
+        paper_bgcolor="#0e1117",
+        plot_bgcolor="#141920",
+        font_color="#dce6f0",
+        xaxis=dict(gridcolor="#2a3444"),
+        yaxis=dict(gridcolor="#2a3444", title="Grenades Thrown"),
+        legend=dict(bgcolor="#1a2332"),
+        height=350,
+        margin=dict(l=10, r=10, t=20, b=10),
+    )
+    st.plotly_chart(nade_fig, use_container_width=True)
+
+    # ── HE damage vs flash assists scatter ──
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.markdown("#### HE Damage per Grenade")
+        he_fig = go.Figure(go.Bar(
+            x=util_display.sort_values("HE DMG/Nade", ascending=True).index.tolist(),
+            y=util_display.sort_values("HE DMG/Nade", ascending=True)["HE DMG/Nade"].tolist(),
+            marker_color="#ff6b35",
+            text=util_display.sort_values("HE DMG/Nade", ascending=True)["HE DMG/Nade"].tolist(),
+            textposition="outside",
+        ))
+        he_fig.update_layout(
+            paper_bgcolor="#0e1117",
+            plot_bgcolor="#141920",
+            font_color="#dce6f0",
+            xaxis=dict(gridcolor="#2a3444"),
+            yaxis=dict(gridcolor="#2a3444", title="Avg DMG per HE"),
+            height=300,
+            margin=dict(l=10, r=10, t=10, b=10),
+        )
+        st.plotly_chart(he_fig, use_container_width=True)
+
+    with c2:
+        st.markdown("#### Flash Assists per Flash Thrown")
+        flash_fig = go.Figure(go.Bar(
+            x=util_display.sort_values("Assist/Flash", ascending=True).index.tolist(),
+            y=util_display.sort_values("Assist/Flash", ascending=True)["Assist/Flash"].tolist(),
+            marker_color="#4a90d9",
+            text=util_display.sort_values("Assist/Flash", ascending=True)["Assist/Flash"].tolist(),
+            textposition="outside",
+        ))
+        flash_fig.update_layout(
+            paper_bgcolor="#0e1117",
+            plot_bgcolor="#141920",
+            font_color="#dce6f0",
+            xaxis=dict(gridcolor="#2a3444"),
+            yaxis=dict(gridcolor="#2a3444", title="Assists per Flash"),
+            height=300,
+            margin=dict(l=10, r=10, t=10, b=10),
+        )
+        st.plotly_chart(flash_fig, use_container_width=True)
+
+    # ── Grenades per round heatmap ──
+    st.markdown("#### Grenade Usage per Round")
+    rutil_fig = go.Figure(go.Heatmap(
+        z=round_util.T.values,
+        x=[f"R{r}" for r in round_util.index],
+        y=["Flashes", "HEs", "Smokes", "Molotovs"],
+        colorscale=[[0, "#141920"], [0.2, "#1a3a2a"], [0.6, "#00aa55"], [1.0, "#00ff88"]],
+        text=round_util.T.values,
+        texttemplate="%{text}",
+        showscale=True,
+        hovertemplate="Round %{x}<br>%{y}: %{z}<extra></extra>",
+    ))
+    rutil_fig.update_layout(
+        paper_bgcolor="#0e1117",
+        plot_bgcolor="#141920",
+        font_color="#dce6f0",
+        xaxis=dict(side="top", tickfont=dict(size=10)),
+        height=220,
+        margin=dict(l=10, r=10, t=60, b=10),
+    )
+    st.plotly_chart(rutil_fig, use_container_width=True)
     
     
 

@@ -35,3 +35,24 @@ print(round_end_df.to_string())
 print("\n=== round_freeze_end columns ===")
 print(round_freeze_df.columns.tolist())
 print(round_freeze_df.head(3).to_string())
+
+_, flash_df    = parser.parse_events(["flashbang_detonate"])[0]
+_, he_df       = parser.parse_events(["hegrenade_detonate"])[0]
+_, smoke_df    = parser.parse_events(["smokegrenade_detonate"])[0]
+_, molotov_df  = parser.parse_events(["inferno_startburn"])[0]
+
+print("=== flashbang_detonate columns ===")
+print(flash_df.columns.tolist())
+print(flash_df.head(2).to_string())
+
+print("\n=== hegrenade_detonate columns ===")
+print(he_df.columns.tolist())
+print(he_df.head(2).to_string())
+
+print("\n=== smokegrenade_detonate columns ===")
+print(smoke_df.columns.tolist())
+print(smoke_df.head(2).to_string())
+
+print("\n=== inferno_startburn columns ===")
+print(molotov_df.columns.tolist())
+print(molotov_df.head(2).to_string())
