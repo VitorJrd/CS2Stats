@@ -12,6 +12,10 @@ from kast import compute_kast
 from rating import compute_rating
 from round_timeline import build_round_timeline, build_player_round_matrix
 from utility import compute_utility_stats
+from economy import compute_economy
+from heatmap import build_position_heatmap
+import requests
+from PIL import Image
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -54,6 +58,20 @@ def parse_and_compute(dem_bytes: bytes):
         _, he_df      = parser.parse_events(["hegrenade_detonate"])[0]
         _, smoke_df   = parser.parse_events(["smokegrenade_detonate"])[0]
         _, molotov_df = parser.parse_events(["inferno_startburn"])[0]
+        _, freeze_df = parser.parse_events(["round_freeze_end"])[0]
+        freeze_ticks = sorted(freeze_df["tick"].tolist())
+        tick_df = parser.parse_ticks(
+            ["current_equip_value", "cash_spent_this_round", "total_cash_spent", "cash", "team_name"],
+            ticks=freeze_ticks
+        )
+        all_ticks = list(range(0, 200000, 640))  # every ~10s
+        pos_df = parser.parse_ticks(
+            ["X", "Y", "Z", "team_name", "is_alive"],
+            ticks=all_ticks
+        )
+        header = parser.parse_header()
+        map_name = header.get("map_name", "de_nuke")
+
     finally:
         try:
             os.unlink(tmp_path)
@@ -93,7 +111,7 @@ def parse_and_compute(dem_bytes: bytes):
     stats["KAST%"]  = stats.index.map(lambda p: kast_pct.get(p, 0.0))
     stats["Rating"] = compute_rating(stats, kills_df, round_df)
 
-    return stats, total_rounds, kills_df, damage_df, round_df, spawn_df, flash_df, he_df, smoke_df, molotov_df
+    return stats, total_rounds, kills_df, damage_df, round_df, spawn_df, flash_df, he_df, smoke_df, molotov_df, tick_df, pos_df, map_name
 
 
 def rating_color(val):
@@ -245,7 +263,7 @@ uploaded = st.file_uploader("Upload a CS2 demo file (.dem)", type=["dem"])
 
 if uploaded:
     with st.spinner("Parsing demo..."):
-        stats, total_rounds, kills_df, damage_df, round_df, spawn_df, flash_df, he_df, smoke_df, molotov_df = parse_and_compute(uploaded.read())
+        stats, total_rounds, kills_df, damage_df, round_df, spawn_df, flash_df, he_df, smoke_df, molotov_df, tick_df, pos_df, map_name = parse_and_compute(uploaded.read())
 
     stats_sorted = stats.sort_values("Rating", ascending=False)
 
@@ -529,6 +547,187 @@ if uploaded:
         margin=dict(l=10, r=10, t=60, b=10),
     )
     st.plotly_chart(rutil_fig, use_container_width=True)
+
+    # ── Economy Tracker ──
+    st.markdown("---")
+    st.markdown("### 💰 Economy Tracker")
+
+    eco_data = compute_economy(tick_df, round_df)
+    team_buys   = eco_data["team_buys_df"]
+    win_rates   = eco_data["win_rates"]
+    round_econ  = eco_data["round_economy"]
+    player_eco  = eco_data["player_eco"]
+
+    # ── Summary metrics ──
+    ecols = st.columns(4)
+    total_spent_all = int(player_eco["total_spent"].sum())
+    avg_spent_round = round(player_eco["avg_spent"].mean(), 0)
+    eco_wins   = eco_data["eco_wins"]
+    eco_losses = eco_data["eco_losses"]
+    for col, (label, val) in zip(ecols, [
+        ("Total Money Spent", f"${total_spent_all:,}"),
+        ("Avg Spent per Round", f"${int(avg_spent_round):,}"),
+        ("Eco Round Wins", eco_wins),
+        ("Eco Round Losses", eco_losses),
+    ]):
+        col.metric(label, val)
+
+    # ── Win rates by buy type ──
+    st.markdown("#### Win Rate by Buy Type")
+    wr_cols = st.columns(2)
+
+    for i, team_side in enumerate(["T", "CT"]):
+        with wr_cols[i]:
+            st.markdown(f"**{'Terrorist' if team_side == 'T' else 'Counter-Terrorist'} Side**")
+            try:
+                team_wr = win_rates.loc[team_side].reset_index()
+                team_wr.columns = ["Buy Type", "Rounds", "Wins", "Win Rate %"]
+                buy_order = ["Full Buy", "Half Buy", "Force", "Eco"]
+                team_wr["Buy Type"] = pd.Categorical(team_wr["Buy Type"], categories=buy_order, ordered=True)
+                team_wr = team_wr.sort_values("Buy Type")
+
+                wr_fig = go.Figure(go.Bar(
+                    x=team_wr["Buy Type"].tolist(),
+                    y=team_wr["Win Rate %"].tolist(),
+                    text=[f"{v}%" for v in team_wr["Win Rate %"]],
+                    textposition="outside",
+                    marker_color=["#00ff88", "#ffd700", "#ff9933", "#ff4444"],
+                ))
+                wr_fig.update_layout(
+                    paper_bgcolor="#0e1117",
+                    plot_bgcolor="#141920",
+                    font_color="#dce6f0",
+                    xaxis=dict(gridcolor="#2a3444"),
+                    yaxis=dict(gridcolor="#2a3444", range=[0, 110], title="Win Rate %"),
+                    height=280,
+                    margin=dict(l=10, r=10, t=10, b=10),
+                )
+                st.plotly_chart(wr_fig, use_container_width=True)
+            except KeyError:
+                st.info(f"No data for {team_side} side")
+
+    # ── Team equipment value per round ──
+    st.markdown("#### Team Equipment Value per Round")
+    eq_fig = go.Figure()
+    colors = {"T": "#ff6b35", "CT": "#4a90d9"}
+    for team_side in ["T", "CT"]:
+        if team_side in round_econ.columns:
+            eq_fig.add_trace(go.Scatter(
+                x=round_econ.index.tolist(),
+                y=round_econ[team_side].tolist(),
+                name=f"{'Terrorist' if team_side == 'T' else 'CT'} Side",
+                line=dict(color=colors[team_side], width=2),
+                mode="lines+markers",
+            ))
+    eq_fig.update_layout(
+        paper_bgcolor="#0e1117",
+        plot_bgcolor="#141920",
+        font_color="#dce6f0",
+        xaxis=dict(gridcolor="#2a3444", title="Round", dtick=1),
+        yaxis=dict(gridcolor="#2a3444", title="Total Equipment Value ($)"),
+        legend=dict(bgcolor="#1a2332"),
+        height=320,
+        margin=dict(l=10, r=10, t=10, b=10),
+    )
+    st.plotly_chart(eq_fig, use_container_width=True)
+
+    # ── Buy type per round timeline ──
+    st.markdown("#### Buy Type Timeline")
+    buy_colors = {"Full Buy": "#00ff88", "Half Buy": "#ffd700", "Force": "#ff9933", "Eco": "#ff4444"}
+
+    bt_fig = go.Figure()
+    for team_side, marker_symbol in [("T", "circle"), ("CT", "square")]:
+        team_data = team_buys[team_buys["team"] == team_side]
+        for buy_type, color in buy_colors.items():
+            subset = team_data[team_data["buy_type"] == buy_type]
+            if not subset.empty:
+                bt_fig.add_trace(go.Scatter(
+                    x=subset["round"].tolist(),
+                    y=[team_side] * len(subset),
+                    mode="markers",
+                    marker=dict(
+                        symbol=marker_symbol,
+                        size=16,
+                        color=[color if w else "#333" for w in subset["won"]],
+                        line=dict(width=2, color=color),
+                    ),
+                    name=f"{team_side} {buy_type}",
+                    text=[f"R{r} {bt} {'✓' if w else '✗'}" for r, bt, w in
+                          zip(subset["round"], subset["buy_type"], subset["won"])],
+                    hoverinfo="text",
+                    showlegend=False,
+                ))
+
+    # Add legend manually
+    for buy_type, color in buy_colors.items():
+        bt_fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="markers",
+            marker=dict(size=10, color=color),
+            name=buy_type, showlegend=True,
+        ))
+
+    bt_fig.update_layout(
+        paper_bgcolor="#0e1117",
+        plot_bgcolor="#141920",
+        font_color="#dce6f0",
+        xaxis=dict(gridcolor="#2a3444", title="Round", dtick=1),
+        yaxis=dict(gridcolor="#2a3444"),
+        legend=dict(bgcolor="#1a2332"),
+        height=250,
+        margin=dict(l=10, r=10, t=10, b=40),
+    )
+    st.plotly_chart(bt_fig, use_container_width=True)
+    st.caption("Filled = won, hollow = lost")
+
+    # ── Per-player economy table ──
+    st.markdown("#### Per-Player Economy")
+    eco_display = player_eco.copy()
+    eco_display["total_spent"] = eco_display["total_spent"].apply(lambda x: f"${int(x):,}")
+    eco_display["avg_spent"]   = eco_display["avg_spent"].apply(lambda x: f"${int(x):,}")
+    eco_display["avg_equip"]   = eco_display["avg_equip"].apply(lambda x: f"${int(x):,}")
+    eco_display = eco_display.rename(columns={
+        "total_spent":   "Total Spent",
+        "avg_spent":     "Avg/Round",
+        "avg_equip":     "Avg Equip",
+        "rounds_played": "Rounds",
+        "Full Buy":      "Full Buys",
+        "Half Buy":      "Half Buys",
+        "Force":         "Forces",
+        "Eco":           "Ecos",
+    })
+    eco_display.index.name = "Player"
+    st.dataframe(eco_display, use_container_width=True)
+
+    # ── Position Heatmaps ──
+    st.markdown("---")
+    st.markdown("### 🗺️ Position Heatmaps")
+
+    # Controls
+    hm_cols = st.columns(3)
+    with hm_cols[0]:
+        hm_mode = st.selectbox("Mode", ["deaths", "kills", "positions"], 
+                                format_func=lambda x: {"deaths": "💀 Deaths", 
+                                                        "kills": "🔫 Kills",
+                                                        "positions": "📍 Positions"}[x])
+    with hm_cols[1]:
+        hm_player = st.selectbox("Player", ["All Players"] + stats_sorted.index.tolist())
+        player_filter = None if hm_player == "All Players" else hm_player
+    with hm_cols[2]:
+        floor = st.selectbox("Floor", ["upper", "lower", "both"], 
+                     help="Nuke only — upper/lower refer to Z level. Use 'both' for other maps.")
+
+    with st.spinner("Building heatmap..."):
+        fig_hm = build_position_heatmap(
+            pos_df, kills_df, map_name,
+            mode=hm_mode,
+            player_filter=player_filter,
+            floor_filter=floor,
+        )
+
+    if fig_hm:
+        st.plotly_chart(fig_hm, use_container_width=False)
+    else:
+        st.warning("No data for this selection.")
     
     
 

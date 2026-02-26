@@ -56,3 +56,21 @@ print(smoke_df.head(2).to_string())
 print("\n=== inferno_startburn columns ===")
 print(molotov_df.columns.tolist())
 print(molotov_df.head(2).to_string())
+
+tick_df = parser.parse_ticks(["current_equip_value", "cash_spent_this_round", 
+                               "total_cash_spent", "cash", "team_name"], ticks=[1479, 6678, 17724])
+
+print("=== tick props (freeze end ticks) ===")
+print(tick_df.columns.tolist())
+print(tick_df.to_string())
+
+# Get map name
+header = parser.parse_header()
+print("=== header ===")
+print(header)
+
+# Sample some position ticks to see coordinate ranges
+pos_df = parser.parse_ticks(["X", "Y", "Z", "team_name", "is_alive"], ticks=[3187, 3308, 5078])
+print("\n=== position tick props ===")
+print(pos_df.columns.tolist())
+print(pos_df.to_string())
