@@ -5,7 +5,6 @@ from PIL import Image
 import io
 import base64
 
-# ── Map calibration data ──────────────────────────────────────────────────────
 MAP_DATA = {
     "de_nuke":     {"pos_x": -3453, "pos_y": 2887,  "scale": 7.0,  "upper_z": -100},
     "de_mirage":   {"pos_x": -3230, "pos_y": 1713,  "scale": 5.0,  "upper_z": None},
@@ -30,7 +29,6 @@ def process_map_image(img_bytes):
     """Convert raw image bytes to base64 string for Plotly."""
     try:
         img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
-        # Slightly darken for better overlay contrast
         dark = Image.new("RGBA", img.size, (0, 0, 0, 255))
         blended = Image.blend(dark, img, alpha=0.75)
         buf = io.BytesIO()
@@ -49,7 +47,7 @@ def get_event_positions(kills_df, pos_df, mode, player_filter=None):
     if mode == "deaths":
         events = kills_df[kills_df["user_name"].notna()][["user_name", "tick"]].copy()
         events = events.rename(columns={"user_name": "player"})
-    else:  # kills
+    else:  #kills
         events = kills_df[
             kills_df["attacker_name"].notna() &
             (kills_df["attacker_name"] != kills_df["user_name"])
@@ -63,7 +61,6 @@ def get_event_positions(kills_df, pos_df, mode, player_filter=None):
         return pd.DataFrame()
 
     positions = []
-    # Build a lookup dict per player for speed
     player_pos_map = {
         name: grp.reset_index(drop=True)
         for name, grp in pos_df.groupby("name")
@@ -93,18 +90,15 @@ def build_position_heatmap(pos_df, kills_df, map_name: str,
 
     m = MAP_DATA.get(map_name, MAP_DATA["de_nuke"])
 
-    # ── Process map image ─────────────────────────────────────────────────
     if map_img_bytes:
         img_b64, (W, H) = process_map_image(map_img_bytes)
     else:
         img_b64, (W, H) = None, (1024, 1024)
 
-    # ── Get position data ─────────────────────────────────────────────────
     if mode == "positions":
         df = pos_df.copy()
         if player_filter:
             df = df[df["name"] == player_filter]
-        # Filter to alive players only — convert to bool safely
         df = df[df["is_alive"].astype(bool) == True]
         point_color = "rgba(0, 200, 255, 0.5)"
         title = f"Position Heatmap — {'All Players' if not player_filter else player_filter}"

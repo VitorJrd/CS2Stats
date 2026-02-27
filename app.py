@@ -14,6 +14,7 @@ from round_timeline import build_round_timeline, build_player_round_matrix
 from utility import compute_utility_stats
 from economy import compute_economy
 from heatmap import build_position_heatmap
+from combat import compute_multikills, compute_opening_duels, compute_clutches, compute_weapon_stats
 import requests
 from PIL import Image
 
@@ -39,35 +40,22 @@ html, body, [data-testid="stAppViewContainer"] {
     font-weight: 400;
 }
 
-/* Hide ALL Streamlit chrome including header/sidebar toggle */
 #MainMenu, footer, header { visibility: hidden !important; }
 [data-testid="stToolbar"] { display: none !important; }
 [data-testid="stSidebarCollapsedControl"] { display: none !important; }
 .stDeployButton { display: none !important; }
 
-/* ── Sidebar ── */
 [data-testid="stSidebar"] {
     background: #0c1018 !important;
     border-right: 1px solid #1a2030 !important;
     padding-top: 0 !important;
 }
-[data-testid="stSidebar"] > div:first-child { padding-top: 0 !important; }
 
-/* ── Main content area ── */
 [data-testid="stMainBlockContainer"] {
     padding: 0 2rem !important;
     max-width: 100% !important;
 }
 
-/* ── Top nav bar ── */
-.topnav {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 18px 0 18px 0;
-    border-bottom: 1px solid #1a2030;
-    margin-bottom: 28px;
-}
 .cs2-wordmark {
     font-family: 'Barlow Condensed', sans-serif;
     font-weight: 800;
@@ -78,43 +66,6 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 .cs2-wordmark span { color: #f0b429; }
 
-/* ── Sidebar content styles (still used for match info) ── */
-.sidebar-divider { height: 1px; background: #1a2030; margin: 16px 20px; }
-.sidebar-section-label {
-    font-family: 'Barlow Condensed', sans-serif;
-    font-size: 10px; font-weight: 600; letter-spacing: 0.2em;
-    text-transform: uppercase; color: #3a4558;
-    padding: 0 20px; margin-bottom: 8px; display: block;
-}
-.match-info-block { padding: 0 20px; margin-bottom: 6px; }
-.match-info-label {
-    font-size: 10px; font-weight: 600; letter-spacing: 0.15em;
-    text-transform: uppercase; color: #3a4558; margin-bottom: 2px;
-}
-.match-info-value {
-    font-family: 'Barlow Condensed', sans-serif;
-    font-size: 16px; font-weight: 700; color: #e8ecf2; letter-spacing: 0.02em;
-}
-.score-block {
-    padding: 16px 20px; background: #0f1520;
-    margin: 0 12px 16px 12px; border-radius: 4px;
-    border: 1px solid #1a2030; text-align: center;
-}
-.score-teams { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.score-team {
-    font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700;
-    letter-spacing: 0.15em; text-transform: uppercase; color: #5a6a82;
-}
-.score-num {
-    font-family: 'Barlow Condensed', sans-serif; font-size: 36px; font-weight: 800;
-    letter-spacing: -0.02em; color: #ffffff; line-height: 1;
-}
-.score-vs {
-    font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600;
-    color: #2a3448; letter-spacing: 0.1em;
-}
-
-/* ── Section headers ── */
 .section-header { display: flex; align-items: center; gap: 10px; margin: 28px 0 14px 0; }
 .section-header-line { flex: 1; height: 1px; background: #1a2030; }
 .section-title {
@@ -122,7 +73,6 @@ html, body, [data-testid="stAppViewContainer"] {
     letter-spacing: 0.22em; text-transform: uppercase; color: #3a4a62; white-space: nowrap;
 }
 
-/* ── Tabs ── */
 [data-testid="stTabs"] { gap: 0 !important; }
 [data-testid="stTabsTabList"] {
     background: transparent !important; border-bottom: 1px solid #1a2030 !important;
@@ -143,7 +93,6 @@ button[data-testid="stTab"][aria-selected="true"] {
 }
 [data-testid="stTabsContent"] { padding-top: 24px !important; background: transparent !important; }
 
-/* ── Dataframes ── */
 [data-testid="stDataFrame"] { border: 1px solid #1a2030 !important; border-radius: 3px !important; }
 [data-testid="stDataFrame"] th {
     background: #0c1018 !important; font-family: 'Barlow Condensed', sans-serif !important;
@@ -155,7 +104,6 @@ button[data-testid="stTab"][aria-selected="true"] {
     color: #c8d0dc !important; background: #080b0f !important;
 }
 
-/* ── Metrics ── */
 [data-testid="metric-container"] {
     background: #0c1018 !important; border: 1px solid #1a2030 !important;
     border-radius: 3px !important; padding: 12px 16px !important;
@@ -170,7 +118,6 @@ button[data-testid="stTab"][aria-selected="true"] {
     font-weight: 800 !important; color: #ffffff !important;
 }
 
-/* ── Select boxes & sliders ── */
 [data-testid="stSelectbox"] label, [data-testid="stSlider"] label {
     font-family: 'Barlow Condensed', sans-serif !important; font-size: 11px !important;
     font-weight: 700 !important; letter-spacing: 0.15em !important;
@@ -182,7 +129,6 @@ button[data-testid="stTab"][aria-selected="true"] {
     font-family: 'Barlow', sans-serif !important; font-size: 13px !important;
 }
 
-/* ── File uploader ── */
 [data-testid="stFileUploader"] {
     border: 1px dashed #1a2030 !important; border-radius: 4px !important;
     background: #0c1018 !important; padding: 8px !important;
@@ -192,20 +138,9 @@ button[data-testid="stTab"][aria-selected="true"] {
     letter-spacing: 0.1em !important; text-transform: uppercase !important; color: #5a6a82 !important;
 }
 
-/* compact uploader in nav */
-.nav-uploader [data-testid="stFileUploader"] {
-    border: 1px solid #1a2030 !important; border-radius: 3px !important;
-    background: #0c1018 !important; padding: 4px 8px !important;
-    min-height: 0 !important;
-}
-
-/* ── Spinner ── */
 [data-testid="stSpinner"] { color: #f0b429 !important; }
-
-/* ── Plotly ── */
 .js-plotly-plot, .plotly { border-radius: 3px; }
 
-/* ── Kill feed ── */
 .killfeed-entry {
     display: flex; align-items: center; gap: 8px;
     padding: 7px 12px; border-bottom: 1px solid #0f1520;
@@ -217,7 +152,6 @@ button[data-testid="stTab"][aria-selected="true"] {
 .killfeed-weapon { color: #3a4a62; font-size: 11px; font-family: 'JetBrains Mono', monospace; }
 .killfeed-hs { color: #f0b429; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; }
 
-/* ── Round result ── */
 .round-result { padding: 12px 16px; border-radius: 3px; border-left: 3px solid; margin-bottom: 16px; }
 .round-result.t-win  { background: rgba(255,107,53,0.08); border-color: #ff6b35; }
 .round-result.ct-win { background: rgba(74,158,255,0.08);  border-color: #4a9eff; }
@@ -225,7 +159,6 @@ button[data-testid="stTab"][aria-selected="true"] {
 .round-result-winner { font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
 .round-result-reason { font-size: 11px; color: #3a4a62; margin-top: 2px; font-family: 'JetBrains Mono', monospace; }
 
-/* ── Upload hero ── */
 .upload-hero { text-align: center; padding: 60px 40px 40px 40px; }
 .upload-hero-title {
     font-family: 'Barlow Condensed', sans-serif; font-size: 52px; font-weight: 800;
@@ -237,14 +170,23 @@ button[data-testid="stTab"][aria-selected="true"] {
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
     max-width: 640px; margin: 0 auto; text-align: left;
 }
-.upload-feature {
-    background: #0c1018; border: 1px solid #1a2030; border-radius: 3px; padding: 14px 16px;
-}
+.upload-feature { background: #0c1018; border: 1px solid #1a2030; border-radius: 3px; padding: 14px 16px; }
 .upload-feature-title {
     font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700;
     letter-spacing: 0.1em; text-transform: uppercase; color: #8a9ab8; margin-bottom: 4px;
 }
 .upload-feature-desc { font-size: 11px; color: #3a4a62; line-height: 1.5; }
+
+/* ── Combat badges ── */
+.mk-badge {
+    display: inline-block;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 11px; font-weight: 800; letter-spacing: 0.12em;
+    padding: 2px 8px; border-radius: 2px; margin-right: 4px;
+}
+.mk-3k { background: rgba(234,179,8,0.15); color: #eab308; }
+.mk-4k { background: rgba(249,115,22,0.15); color: #f97316; }
+.mk-ace { background: rgba(239,68,68,0.15); color: #ef4444; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -265,6 +207,12 @@ COLOR_CT     = "#4a9eff"
 COLOR_GREEN  = "#22c55e"
 COLOR_RED    = "#ef4444"
 COLOR_YELLOW = "#eab308"
+
+
+def hex_to_rgba(hex_color, alpha=0.13):
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
 
 
 def rating_color(val):
@@ -370,10 +318,6 @@ def parse_and_compute(dem_bytes: bytes):
             flash_df, he_df, smoke_df, molotov_df, tick_df, pos_df,
             map_name, server, t_wins, ct_wins)
 
-def hex_to_rgba(hex_color, alpha=0.13):
-    h = hex_color.lstrip("#")
-    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-    return f"rgba({r},{g},{b},{alpha})"
 
 # ── Chart builders ────────────────────────────────────────────────────────────
 def build_stats_table(stats):
@@ -410,8 +354,8 @@ def build_stats_table(stats):
                 [hex_to_rgba(rating_color(v)) for v in stats["Rating"]],
             ],
             font=dict(
-                family=["Barlow, sans-serif"] * 1 + ["JetBrains Mono, monospace"] * 8,
-                color=["#c8d0dc"] * 1 + ["#8a9ab8"] * 7 + [[rating_color(v) for v in stats["Rating"]]],
+                family=["Barlow, sans-serif"] + ["JetBrains Mono, monospace"] * 8,
+                color=["#c8d0dc"] + ["#8a9ab8"] * 7 + [[rating_color(v) for v in stats["Rating"]]],
                 size=12,
             ),
             align=["left"] + ["center"] * 8, height=30,
@@ -508,20 +452,14 @@ def build_radar(stats, player):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TOP NAV  — always visible, contains wordmark + file uploader
+# TOP NAV
 # ══════════════════════════════════════════════════════════════════════════════
 nav_left, nav_right = st.columns([3, 2])
-
 with nav_left:
     st.markdown('<div style="padding-top:14px"><span class="cs2-wordmark">CS2<span>ANALYST</span></span></div>',
                 unsafe_allow_html=True)
-
 with nav_right:
-    uploaded = st.file_uploader(
-        "Upload .dem", type=["dem"],
-        label_visibility="collapsed",
-        key="demo_upload",
-    )
+    uploaded = st.file_uploader("Upload .dem", type=["dem"], label_visibility="collapsed", key="demo_upload")
 
 st.markdown('<div style="height:1px;background:#1a2030;margin-bottom:28px"></div>', unsafe_allow_html=True)
 
@@ -536,35 +474,16 @@ if uploaded is None:
         <div class="upload-hero-sub">Professional demo analysis. Drop a .dem file above to begin.</div>
     </div>
     """, unsafe_allow_html=True)
-
     _, center, _ = st.columns([1, 2, 1])
     with center:
         st.markdown("""
         <div class="upload-feature-grid">
-            <div class="upload-feature">
-                <div class="upload-feature-title">Performance</div>
-                <div class="upload-feature-desc">K/D/A, ADR, KAST%, HLTV Rating 2.0</div>
-            </div>
-            <div class="upload-feature">
-                <div class="upload-feature-title">Round Data</div>
-                <div class="upload-feature-desc">Kill heatmap, round timeline, kill feed</div>
-            </div>
-            <div class="upload-feature">
-                <div class="upload-feature-title">Utility</div>
-                <div class="upload-feature-desc">Flash, HE, smoke and molotov efficiency</div>
-            </div>
-            <div class="upload-feature">
-                <div class="upload-feature-title">Economy</div>
-                <div class="upload-feature-desc">Buy types, win rates, team equity</div>
-            </div>
-            <div class="upload-feature">
-                <div class="upload-feature-title">Positions</div>
-                <div class="upload-feature-desc">Kill and death heatmaps on map radar</div>
-            </div>
-            <div class="upload-feature">
-                <div class="upload-feature-title">Player Dive</div>
-                <div class="upload-feature-desc">Per-player radar vs. match average</div>
-            </div>
+            <div class="upload-feature"><div class="upload-feature-title">Performance</div><div class="upload-feature-desc">K/D/A, ADR, KAST%, HLTV Rating 2.0</div></div>
+            <div class="upload-feature"><div class="upload-feature-title">Round Data</div><div class="upload-feature-desc">Kill heatmap, round timeline, kill feed</div></div>
+            <div class="upload-feature"><div class="upload-feature-title">Utility</div><div class="upload-feature-desc">Flash, HE, smoke and molotov efficiency</div></div>
+            <div class="upload-feature"><div class="upload-feature-title">Economy</div><div class="upload-feature-desc">Buy types, win rates, team equity</div></div>
+            <div class="upload-feature"><div class="upload-feature-title">Positions</div><div class="upload-feature-desc">Kill and death heatmaps on map radar</div></div>
+            <div class="upload-feature"><div class="upload-feature-title">Combat</div><div class="upload-feature-desc">Clutches, opening duels, multi-kills, weapons</div></div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -606,15 +525,11 @@ else:
     stats_sorted = stats.sort_values("Rating", ascending=False)
 
     # ── Match summary bar ─────────────────────────────────────────────────
-    mc1, mc2, mc3, mc4, mc5 = st.columns([1, 1, 1, 1, 1])
-    with mc1:
-        st.metric("Map", map_display)
-    with mc2:
-        st.metric("Rounds", d["total_rounds"])
-    with mc3:
-        st.metric("T Wins", d["t_wins"])
-    with mc4:
-        st.metric("CT Wins", d["ct_wins"])
+    mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+    with mc1: st.metric("Map", map_display)
+    with mc2: st.metric("Rounds", d["total_rounds"])
+    with mc3: st.metric("T Wins", d["t_wins"])
+    with mc4: st.metric("CT Wins", d["ct_wins"])
     with mc5:
         top_player = stats["Rating"].idxmax()
         st.metric("Rating MVP", f"{top_player}  {stats.loc[top_player,'Rating']:.3f}")
@@ -625,7 +540,7 @@ else:
     ])
 
     # ══════════════════════════════════════════════════════════════════════
-    # TAB 1 — OVERVIEW
+    # TAB 1 — OVERVIEW  (+ multi-kills + weapons)
     # ══════════════════════════════════════════════════════════════════════
     with tab_overview:
         section_header("SCOREBOARD")
@@ -633,11 +548,102 @@ else:
 
         section_header("PERFORMANCE")
         c1, c2 = st.columns(2)
-        with c1:
-            st.plotly_chart(build_rating_bar(stats), use_container_width=True)
-        with c2:
-            st.plotly_chart(build_adr_scatter(stats), use_container_width=True)
+        with c1: st.plotly_chart(build_rating_bar(stats), use_container_width=True)
+        with c2: st.plotly_chart(build_adr_scatter(stats), use_container_width=True)
 
+        # ── Multi-kills ────────────────────────────────────────────────
+        section_header("MULTI-KILL ROUNDS")
+        mk_data = compute_multikills(kills_df, round_df)
+        mk_summary = mk_data["summary"]
+
+        if not mk_summary.empty:
+            mk_cols = st.columns([2, 3])
+            with mk_cols[0]:
+                # Summary table
+                mk_display = mk_summary.copy()
+                mk_display.index.name = "Player"
+                st.dataframe(mk_display, use_container_width=True)
+
+            with mk_cols[1]:
+                mk_fig = go.Figure()
+                colors = {"3K": COLOR_YELLOW, "4K": "#f97316", "ACE": COLOR_RED}
+                for label, color in colors.items():
+                    if label in mk_summary.columns:
+                        mk_fig.add_trace(go.Bar(
+                            name=label,
+                            x=mk_summary.index.tolist(),
+                            y=mk_summary[label].tolist(),
+                            marker_color=color, opacity=0.85,
+                        ))
+                mk_fig.update_layout(
+                    **CHART_DEFAULTS, barmode="stack",
+                    title=dict(text="MULTI-KILL ROUNDS BY PLAYER", font=dict(family="Barlow Condensed", size=11, color="#3a4a62"), x=0),
+                    height=300,
+                )
+                st.plotly_chart(mk_fig, use_container_width=True)
+        else:
+            st.markdown('<div style="color:#2a3448;font-size:12px;padding:12px 0">No multi-kill rounds found.</div>', unsafe_allow_html=True)
+
+        # ── Weapon breakdown ───────────────────────────────────────────
+        section_header("WEAPON BREAKDOWN")
+        wpn_data   = compute_weapon_stats(kills_df)
+        by_weapon  = wpn_data["by_weapon"]
+        by_player  = wpn_data["by_player"]
+
+        if not by_weapon.empty:
+            wpn_cols = st.columns([1, 2])
+            with wpn_cols[0]:
+                # Overall top weapons
+                top_wpn = by_weapon.head(12).copy()
+                wpn_fig = go.Figure(go.Bar(
+                    x=top_wpn["kills"], y=top_wpn["weapon"],
+                    orientation="h",
+                    marker=dict(color=COLOR_CT, opacity=0.8),
+                    text=top_wpn["kills"], textposition="outside",
+                    textfont=dict(family="JetBrains Mono", size=10, color="#5a6a82"),
+                    customdata=top_wpn["hs_pct"],
+                    hovertemplate="<b>%{y}</b><br>Kills: %{x}<br>HS%: %{customdata}%<extra></extra>",
+                ))
+                wpn_fig.update_layout(
+                    **CHART_DEFAULTS,
+                    title=dict(text="TOP WEAPONS (TOTAL KILLS)", font=dict(family="Barlow Condensed", size=11, color="#3a4a62"), x=0),
+                    yaxis=dict(**CHART_DEFAULTS["yaxis"], autorange="reversed"),
+                    height=340,
+                )
+                st.plotly_chart(wpn_fig, use_container_width=True)
+
+            with wpn_cols[1]:
+                # Per-player weapon breakdown
+                wpn_player = st.selectbox(
+                    "Player weapon breakdown",
+                    options=stats_sorted.index.tolist(),
+                    label_visibility="collapsed",
+                    key="wpn_player",
+                )
+                if wpn_player and wpn_player in by_player:
+                    pw = by_player[wpn_player].head(10)
+                    pw_fig = go.Figure()
+                    pw_fig.add_trace(go.Bar(
+                        name="Kills", x=pw["weapon"], y=pw["kills"],
+                        marker_color=COLOR_CT, opacity=0.85,
+                        text=pw["kills"], textposition="outside",
+                        textfont=dict(family="JetBrains Mono", size=10, color="#5a6a82"),
+                    ))
+                    pw_fig.add_trace(go.Bar(
+                        name="HS", x=pw["weapon"], y=pw["hs"],
+                        marker_color=ACCENT, opacity=0.7,
+                        text=pw["hs"], textposition="outside",
+                        textfont=dict(family="JetBrains Mono", size=10, color=ACCENT),
+                    ))
+                    pw_fig.update_layout(
+                        **CHART_DEFAULTS, barmode="overlay",
+                        title=dict(text=f"{wpn_player.upper()}  —  KILLS & HEADSHOTS PER WEAPON",
+                                   font=dict(family="Barlow Condensed", size=11, color="#3a4a62"), x=0),
+                        height=340,
+                    )
+                    st.plotly_chart(pw_fig, use_container_width=True)
+
+        # ── Player profile ─────────────────────────────────────────────
         section_header("PLAYER PROFILE")
         selected = st.selectbox("Player", options=stats_sorted.index.tolist(), label_visibility="collapsed")
         if selected:
@@ -651,12 +657,11 @@ else:
                 ("KAST",    f"{r['KAST%']}%"),
                 ("Rating",  f"{r['Rating']:.3f}"),
             ]):
-                with col:
-                    st.metric(label, val)
+                with col: st.metric(label, val)
             st.plotly_chart(build_radar(stats, selected), use_container_width=True)
 
     # ══════════════════════════════════════════════════════════════════════
-    # TAB 2 — ROUNDS
+    # TAB 2 — ROUNDS  (+ opening duels + clutches)
     # ══════════════════════════════════════════════════════════════════════
     with tab_rounds:
         kills_matrix, dmg_matrix, deaths_matrix, all_players = build_player_round_matrix(
@@ -690,6 +695,122 @@ else:
         )
         st.plotly_chart(fig_heatmap, use_container_width=True)
 
+        # ── Opening duels ──────────────────────────────────────────────
+        section_header("OPENING DUELS")
+        od_data   = compute_opening_duels(kills_df, round_df)
+        od_summary = od_data["summary"]
+        od_rounds  = od_data["per_round"]
+
+        if not od_summary.empty:
+            od_c1, od_c2 = st.columns(2)
+            with od_c1:
+                # Bar: opens vs open deaths
+                od_plot = od_summary.reset_index()
+                od_fig = go.Figure()
+                od_fig.add_trace(go.Bar(
+                    name="Opening Kills", x=od_plot["Player"], y=od_plot["opens"],
+                    marker_color=COLOR_GREEN, opacity=0.85,
+                    text=od_plot["opens"], textposition="outside",
+                    textfont=dict(family="JetBrains Mono", size=10, color="#5a6a82"),
+                ))
+                od_fig.add_trace(go.Bar(
+                    name="Opening Deaths", x=od_plot["Player"], y=od_plot["open_deaths"],
+                    marker_color=COLOR_RED, opacity=0.75,
+                    text=od_plot["open_deaths"], textposition="outside",
+                    textfont=dict(family="JetBrains Mono", size=10, color="#5a6a82"),
+                ))
+                od_fig.update_layout(
+                    **CHART_DEFAULTS, barmode="group",
+                    title=dict(text="OPENING KILLS vs OPENING DEATHS", font=dict(family="Barlow Condensed", size=11, color="#3a4a62"), x=0),
+                    height=300,
+                )
+                st.plotly_chart(od_fig, use_container_width=True)
+
+            with od_c2:
+                # Win rate when player opens
+                od_wr = od_summary[od_summary["opens"] > 0].reset_index()
+                wr_fig = go.Figure(go.Bar(
+                    x=od_wr["Player"], y=od_wr["open_win_rate"],
+                    marker_color=[COLOR_GREEN if v >= 50 else COLOR_RED for v in od_wr["open_win_rate"]],
+                    opacity=0.85,
+                    text=[f"{v}%" for v in od_wr["open_win_rate"]], textposition="outside",
+                    textfont=dict(family="JetBrains Mono", size=10, color="#5a6a82"),
+                ))
+                wr_fig.add_hline(y=50, line_dash="dot", line_color="#1a2030", line_width=1)
+                wr_fig.update_layout(
+                    **CHART_DEFAULTS,
+                    title=dict(text="ROUND WIN RATE AFTER OPENING KILL", font=dict(family="Barlow Condensed", size=11, color="#3a4a62"), x=0),
+                    yaxis=dict(**CHART_DEFAULTS["yaxis"], range=[0, 115]),
+                    height=300,
+                )
+                st.plotly_chart(wr_fig, use_container_width=True)
+
+            # Summary table
+            od_display = od_summary.copy().rename(columns={
+                "opens": "Opening Kills", "open_deaths": "Opening Deaths",
+                "open_round_wins": "Round Wins", "open_win_rate": "Win Rate %",
+                "rating": "+/−",
+            })
+            od_display.index.name = "Player"
+            st.dataframe(od_display[["Opening Kills", "Opening Deaths", "+/−", "Round Wins", "Win Rate %"]],
+                         use_container_width=True)
+
+        # ── Clutch situations ──────────────────────────────────────────
+        section_header("CLUTCH SITUATIONS")
+        cl_data    = compute_clutches(kills_df, round_df, spawn_df)
+        cl_summary = cl_data["summary"]
+        cl_rounds  = cl_data["clutches"]
+
+        if not cl_summary.empty:
+            cl_c1, cl_c2 = st.columns(2)
+            with cl_c1:
+                # Stacked bar: won vs lost
+                cl_plot = cl_summary.reset_index()
+                cl_fig = go.Figure()
+                cl_fig.add_trace(go.Bar(
+                    name="Won", x=cl_plot["Player"], y=cl_plot["won"],
+                    marker_color=COLOR_GREEN, opacity=0.85,
+                ))
+                cl_fig.add_trace(go.Bar(
+                    name="Lost", x=cl_plot["Player"], y=cl_plot["lost"],
+                    marker_color=COLOR_RED, opacity=0.75,
+                ))
+                cl_fig.update_layout(
+                    **CHART_DEFAULTS, barmode="stack",
+                    title=dict(text="CLUTCH WINS vs LOSSES", font=dict(family="Barlow Condensed", size=11, color="#3a4a62"), x=0),
+                    height=280,
+                )
+                st.plotly_chart(cl_fig, use_container_width=True)
+
+            with cl_c2:
+                # Win rate donut-style bar per scenario
+                vs_cols = [c for c in cl_summary.columns if c.startswith("1v")]
+                if vs_cols:
+                    scenario_totals = cl_summary[vs_cols].sum()
+                    sc_fig = go.Figure(go.Bar(
+                        x=scenario_totals.index.tolist(),
+                        y=scenario_totals.values.tolist(),
+                        marker_color=[COLOR_CT, COLOR_T, COLOR_RED][:len(vs_cols)],
+                        opacity=0.85,
+                        text=scenario_totals.values.tolist(), textposition="outside",
+                        textfont=dict(family="JetBrains Mono", size=11, color="#5a6a82"),
+                    ))
+                    sc_fig.update_layout(
+                        **CHART_DEFAULTS,
+                        title=dict(text="CLUTCH SCENARIOS (ALL PLAYERS)", font=dict(family="Barlow Condensed", size=11, color="#3a4a62"), x=0),
+                        height=280,
+                    )
+                    st.plotly_chart(sc_fig, use_container_width=True)
+
+            # Summary table
+            cl_display = cl_summary.copy().rename(columns={"won": "Won", "lost": "Lost", "win_rate": "Win Rate %"})
+            cl_display.index.name = "Player"
+            st.dataframe(cl_display, use_container_width=True)
+
+        else:
+            st.markdown('<div style="color:#2a3448;font-size:12px;padding:12px 0">No clutch situations detected.</div>', unsafe_allow_html=True)
+
+        # ── Round breakdown ────────────────────────────────────────────
         section_header("ROUND BREAKDOWN")
         round_nums     = [r["round"] for r in timeline]
         selected_round = st.select_slider("Round", options=round_nums, label_visibility="collapsed")
@@ -701,6 +822,25 @@ else:
         win_color = COLOR_T if winner == "T" else COLOR_CT
         win_label = "TERRORIST WIN" if winner == "T" else "CT WIN"
 
+        # Show opening duel for this round
+        if not od_rounds.empty and selected_round in od_rounds["round"].values:
+            opener_row = od_rounds[od_rounds["round"] == selected_round].iloc[0]
+            impact_color = COLOR_GREEN if opener_row["opener_won_round"] else COLOR_RED
+            impact_text  = "ROUND WIN" if opener_row["opener_won_round"] else "ROUND LOSS"
+            st.markdown(f"""
+            <div style="background:#0c1018;border:1px solid #1a2030;border-radius:3px;
+                        padding:10px 14px;margin-bottom:14px;display:flex;gap:16px;align-items:center">
+                <div style="font-size:10px;font-weight:700;letter-spacing:0.18em;
+                            text-transform:uppercase;color:#3a4a62">FIRST BLOOD</div>
+                <div style="font-family:'Barlow Condensed';font-size:15px;font-weight:700;color:#4a9eff">
+                    {opener_row['opener']}</div>
+                <div style="color:#1a2030">›</div>
+                <div style="font-family:'Barlow Condensed';font-size:15px;font-weight:700;color:#ff5555">
+                    {opener_row['victim']}</div>
+                <div style="margin-left:auto;font-family:'JetBrains Mono';font-size:11px;
+                            font-weight:700;color:{impact_color}">{impact_text}</div>
+            </div>""", unsafe_allow_html=True)
+
         rcols = st.columns([1, 1, 1])
         with rcols[0]:
             st.markdown(f"""
@@ -709,7 +849,6 @@ else:
                 <div class="round-result-winner" style="color:{win_color}">{win_label}</div>
                 <div class="round-result-reason">{reason}</div>
             </div>""", unsafe_allow_html=True)
-
             perf_rows = []
             for p in player_order:
                 k    = round_data["player_kills"].get(p, 0)
@@ -931,7 +1070,6 @@ else:
     # ══════════════════════════════════════════════════════════════════════
     with tab_heatmap:
         section_header("POSITION HEATMAP")
-
         hm_cols = st.columns(3)
         with hm_cols[0]:
             hm_mode = st.selectbox("Mode", ["deaths", "kills", "positions"],
