@@ -370,6 +370,10 @@ def parse_and_compute(dem_bytes: bytes):
             flash_df, he_df, smoke_df, molotov_df, tick_df, pos_df,
             map_name, server, t_wins, ct_wins)
 
+def hex_to_rgba(hex_color, alpha=0.13):
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
 
 # ── Chart builders ────────────────────────────────────────────────────────────
 def build_stats_table(stats):
@@ -403,13 +407,7 @@ def build_stats_table(stats):
                 ["#080b0f"] * len(stats),
                 ["#080b0f"] * len(stats),
                 ["#080b0f"] * len(stats),
-                #[rating_color(v) + "22" for v in stats["Rating"]],
-                [
-                    f"rgba({int(rating_color(v)[1:3],16)},"
-                    f"{int(rating_color(v)[3:5],16)},"
-                    f"{int(rating_color(v)[5:7],16)},0.13)"
-                    for v in stats["Rating"]
-                ]
+                [hex_to_rgba(rating_color(v)) for v in stats["Rating"]],
             ],
             font=dict(
                 family=["Barlow, sans-serif"] * 1 + ["JetBrains Mono, monospace"] * 8,
