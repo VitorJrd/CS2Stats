@@ -1,14 +1,9 @@
 import pandas as pd
 
 def compute_impact(kills_df, round_df):
-    """
-    Impact measures clutch/multi-kill contribution.
-    Impact = 2.13*(rounds with 2+ kills / total) + 0.42*(rounds with 1 kill / total) - 0.41
-    """
     rounds = round_df[round_df["round"] > 0].copy()
     total_rounds = len(rounds)
 
-    # Assign kills to rounds using tick-based searchsorted
     end_ticks = rounds.sort_values("round")["tick"].values
     round_numbers = rounds.sort_values("round")["round"].values
 
@@ -25,7 +20,6 @@ def compute_impact(kills_df, round_df):
     kills_clean["round"] = kills_clean["tick"].apply(assign_round)
     kills_clean = kills_clean.dropna(subset=["round"])
 
-    # Count kills per player per round
     kills_per_round = kills_clean.groupby(["attacker_name", "round"]).size().reset_index(name="kill_count")
 
     impact = {}

@@ -1,28 +1,11 @@
-"""
-combat.py — Advanced combat analytics
-Provides:
-  - compute_multikills()   : 3k / 4k / ace counts per player per round
-  - compute_opening_duels(): first kill per round and impact on round outcome
-  - compute_clutches()     : 1vX situations, who was in them, win/loss
-  - compute_weapon_stats() : kills / hs / headshot% per weapon per player
-"""
-
 import pandas as pd
 
-
-# ── Multi-kills ───────────────────────────────────────────────────────────────
 def compute_multikills(kills_df: pd.DataFrame, round_df: pd.DataFrame) -> dict:
-    """
-    Returns:
-        summary   : DataFrame(player × {3k,4k,ace}) — total counts
-        by_round  : DataFrame with columns [round, player, kills, label]
-    """
     kills_clean = kills_df[
         kills_df["attacker_name"].notna() &
         (kills_df["attacker_name"] != kills_df["user_name"])
     ].copy()
 
-    # Count kills per player per round
     grouped = (
         kills_clean
         .groupby(["round", "attacker_name"])
@@ -30,7 +13,6 @@ def compute_multikills(kills_df: pd.DataFrame, round_df: pd.DataFrame) -> dict:
         .reset_index(name="kills")
     )
 
-    # Only keep rounds where someone got 3+
     multi = grouped[grouped["kills"] >= 3].copy()
 
     def label(k):
@@ -40,7 +22,6 @@ def compute_multikills(kills_df: pd.DataFrame, round_df: pd.DataFrame) -> dict:
 
     multi["label"] = multi["kills"].apply(label)
 
-    # Summary pivot per player
     summary = (
         multi
         .groupby(["attacker_name", "label"])
@@ -58,14 +39,7 @@ def compute_multikills(kills_df: pd.DataFrame, round_df: pd.DataFrame) -> dict:
     return {"summary": summary, "by_round": multi.rename(columns={"attacker_name": "player"})}
 
 
-# ── Opening duels ─────────────────────────────────────────────────────────────
 def compute_opening_duels(kills_df: pd.DataFrame, round_df: pd.DataFrame) -> dict:
-    """
-    Returns:
-        per_round : DataFrame [round, opener, victim, opener_team, round_winner, opener_won_round]
-        summary   : DataFrame per player [opens, open_wins, open_losses, win_rate, impact_rate]
-                    impact_rate = % of opening kills whose team won the round
-    """
     kills_clean = kills_df[
         kills_df["attacker_name"].notna() &
         kills_df["user_name"].notna() &
@@ -75,7 +49,6 @@ def compute_opening_duels(kills_df: pd.DataFrame, round_df: pd.DataFrame) -> dic
     if "round" not in kills_clean.columns:
         return {"per_round": pd.DataFrame(), "summary": pd.DataFrame()}
 
-    # First kill per round = lowest tick
     first_kills = (
         kills_clean
         .sort_values("tick")
@@ -85,19 +58,16 @@ def compute_opening_duels(kills_df: pd.DataFrame, round_df: pd.DataFrame) -> dic
     )
     first_kills.columns = ["round", "opener", "victim", "opener_team", "tick"]
 
-    # Map round winner
     round_winners = round_df[round_df["round"] > 0].set_index("round")["winner"].to_dict()
     first_kills["round_winner"] = first_kills["round"].map(round_winners)
     first_kills["opener_won_round"] = first_kills["opener_team"] == first_kills["round_winner"]
 
-    # Per-player summary — opening kills
     open_kills = first_kills.groupby("opener").agg(
         opens=("round", "count"),
         open_round_wins=("opener_won_round", "sum"),
     ).rename_axis("Player")
     open_kills["open_win_rate"] = (open_kills["open_round_wins"] / open_kills["opens"] * 100).round(1)
 
-    # Per-player summary — opening deaths
     open_deaths = first_kills.groupby("victim").agg(
         open_deaths=("round", "count"),
     ).rename_axis("Player")
@@ -113,15 +83,8 @@ def compute_opening_duels(kills_df: pd.DataFrame, round_df: pd.DataFrame) -> dic
     return {"per_round": first_kills, "summary": summary}
 
 
-# ── Clutch situations ─────────────────────────────────────────────────────────
 def compute_clutches(kills_df: pd.DataFrame, round_df: pd.DataFrame,
                      spawn_df: pd.DataFrame) -> dict:
-    """
-    A clutch = a player is the last alive on their team facing 1 or more opponents.
-    Returns:
-        clutches : DataFrame [round, player, team, vs (int), won (bool)]
-        summary  : DataFrame per player [clutches, won, lost, win_rate, by scenario]
-    """
     kills_clean = kills_df[
         kills_df["attacker_name"].notna() &
         kills_df["user_name"].notna() &
@@ -133,8 +96,6 @@ def compute_clutches(kills_df: pd.DataFrame, round_df: pd.DataFrame,
 
     round_winners = round_df[round_df["round"] > 0].set_index("round")["winner"].to_dict()
 
-    # Get players alive at round start per round
-    # spawn_df has player_name and team_name per round
     spawn_col = "player_name" if "player_name" in spawn_df.columns else \
                 "user_name"   if "user_name"   in spawn_df.columns else None
 
@@ -155,22 +116,18 @@ def compute_clutches(kills_df: pd.DataFrame, round_df: pd.DataFrame,
         if rnd_spawns.empty:
             continue
 
-        # Build alive sets per team
         alive = {
             team: set(grp["player"])
             for team, grp in rnd_spawns.groupby("team")
         }
 
-        # Walk kills in tick order
         for _, kill in rnd_kills.sort_values("tick").iterrows():
             attacker = kill["attacker_name"]
             victim   = kill["user_name"]
 
-            # Remove victim from alive
             for team_set in alive.values():
                 team_set.discard(victim)
 
-            # Check if any team is down to 1 vs 2+
             teams = list(alive.keys())
             if len(teams) < 2:
                 break
@@ -180,7 +137,6 @@ def compute_clutches(kills_df: pd.DataFrame, round_df: pd.DataFrame,
                 if len(alive[team_a]) == 1 and len(alive[team_b]) >= 2:
                     clutch_player = next(iter(alive[team_a]))
                     vs_count      = len(alive[team_b])
-                    # Determine if clutch player's team won
                     player_team_name = rnd_spawns[rnd_spawns["player"] == clutch_player]["team"].values
                     if len(player_team_name) == 0:
                         break
@@ -192,14 +148,13 @@ def compute_clutches(kills_df: pd.DataFrame, round_df: pd.DataFrame,
                         "vs":     vs_count,
                         "won":    won,
                     })
-                    break  # one clutch per team per round
+                    break  
 
     if not clutch_records:
         return {"clutches": pd.DataFrame(), "summary": pd.DataFrame()}
 
     clutches = pd.DataFrame(clutch_records).drop_duplicates(subset=["round", "player"])
 
-    # Summary
     summary = clutches.groupby("player").agg(
         clutches=("round", "count"),
         won=("won", "sum"),
@@ -207,7 +162,6 @@ def compute_clutches(kills_df: pd.DataFrame, round_df: pd.DataFrame,
     summary["lost"]     = summary["clutches"] - summary["won"]
     summary["win_rate"] = (summary["won"] / summary["clutches"] * 100).round(1)
 
-    # Breakdown by vs count
     vs_pivot = (
         clutches.groupby(["player", "vs"])
         .size()
@@ -221,13 +175,7 @@ def compute_clutches(kills_df: pd.DataFrame, round_df: pd.DataFrame,
     return {"clutches": clutches, "summary": summary}
 
 
-# ── Weapon breakdown ──────────────────────────────────────────────────────────
 def compute_weapon_stats(kills_df: pd.DataFrame) -> dict:
-    """
-    Returns:
-        by_weapon  : DataFrame [weapon, kills, hs, hs_pct] — overall
-        by_player  : dict {player: DataFrame [weapon, kills, hs, hs_pct]}
-    """
     kills_clean = kills_df[
         kills_df["attacker_name"].notna() &
         kills_df["user_name"].notna() &

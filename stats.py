@@ -57,11 +57,9 @@ def compute_stats(kills_df, damage_df, round_df, spawn_df):
     stats["HS%"] = ((stats["headshots"] / stats["kills"].replace(0, 1)) * 100).round(1)
     stats["ADR"] = (stats["total_damage"] / total_rounds).round(1)
 
-    # Add KAST
     kast_pct, _ = compute_kast(kills_df, round_df, spawn_df)
     stats["KAST%"] = stats.index.map(lambda p: kast_pct.get(p, 0.0))
 
-    # Add Rating
     stats["Rating"] = compute_rating(stats, kills_df, round_df)
 
     return stats, total_rounds

@@ -26,7 +26,6 @@ def game_to_pixel(x, y, map_name):
 
 
 def process_map_image(img_bytes):
-    """Convert raw image bytes to base64 string for Plotly."""
     try:
         img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
         dark = Image.new("RGBA", img.size, (0, 0, 0, 255))
@@ -40,10 +39,6 @@ def process_map_image(img_bytes):
 
 
 def get_event_positions(kills_df, pos_df, mode, player_filter=None):
-    """
-    For kills/deaths: find the player's nearest sampled position at event tick.
-    Returns a DataFrame with X, Y, Z, name columns.
-    """
     if mode == "deaths":
         events = kills_df[kills_df["user_name"].notna()][["user_name", "tick"]].copy()
         events = events.rename(columns={"user_name": "player"})
@@ -116,7 +111,6 @@ def build_position_heatmap(pos_df, kills_df, map_name: str,
     if df.empty:
         return None
 
-    # ── Floor filter ───────────────────────────────────────────────────────
     upper_z = m.get("upper_z")
     if upper_z is not None and floor_filter != "both":
         if floor_filter == "upper":
@@ -129,16 +123,13 @@ def build_position_heatmap(pos_df, kills_df, map_name: str,
     if df.empty:
         return None
 
-    # ── Convert to pixel coordinates ──────────────────────────────────────
     coords  = [game_to_pixel(x, y, map_name) for x, y in zip(df["X"], df["Y"])]
     px_list = [c[0] for c in coords]
     py_list = [c[1] for c in coords]
     names   = df["name"].tolist() if "name" in df.columns else [""] * len(px_list)
 
-    # ── Build figure ───────────────────────────────────────────────────────
     fig = go.Figure()
 
-    # Map background image
     if img_b64:
         fig.add_layout_image(
             source=img_b64,
@@ -150,7 +141,6 @@ def build_position_heatmap(pos_df, kills_df, map_name: str,
             layer="below",
         )
 
-    # Density contour overlay
     if len(px_list) >= 3:
         fig.add_trace(go.Histogram2dContour(
             x=px_list,
@@ -177,7 +167,6 @@ def build_position_heatmap(pos_df, kills_df, map_name: str,
             hoverinfo="skip",
         ))
 
-    # Individual event markers
     fig.add_trace(go.Scatter(
         x=px_list,
         y=py_list,
