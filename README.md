@@ -1,6 +1,6 @@
 # CS2 Analyst
 
-A professional CS2 demo analysis dashboard built with Streamlit. Upload a `.dem` file and get instant access to deep match statistics — from HLTV-style scorecards and economy tracking to clutch detection, opening duel analysis, and position heatmaps.
+A CS2 demo analysis dashboard built with Streamlit. Upload a `.dem` file and get instant access to deep match statistics — from HLTV-style scorecards and economy tracking to clutch detection, opening duel analysis, and position heatmaps.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square)
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.35+-red?style=flat-square)
