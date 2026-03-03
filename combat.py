@@ -1,10 +1,36 @@
 import pandas as pd
 
+
+def _add_round_col(kills_df: pd.DataFrame, round_df: pd.DataFrame) -> pd.DataFrame:
+    df = kills_df.copy()
+    if "round" in df.columns:
+        return df
+    valid_rounds = round_df[round_df["round"] > 0].sort_values("tick")
+    round_ticks = valid_rounds["tick"].tolist()
+    round_nums  = valid_rounds["round"].tolist()
+    def assign_round(tick):
+        r = 0
+        for i, rt in enumerate(round_ticks):
+            if tick >= rt:
+                r = round_nums[i]
+            else:
+                break
+        return r
+    df["round"] = df["tick"].apply(assign_round)
+    df = df[df["round"] > 0]
+    return df
+
+
 def compute_multikills(kills_df: pd.DataFrame, round_df: pd.DataFrame) -> dict:
     kills_clean = kills_df[
         kills_df["attacker_name"].notna() &
         (kills_df["attacker_name"] != kills_df["user_name"])
     ].copy()
+
+    kills_clean = _add_round_col(kills_clean, round_df)
+
+    if kills_clean.empty or "round" not in kills_clean.columns:
+        return {"summary": pd.DataFrame(), "by_round": pd.DataFrame()}
 
     grouped = (
         kills_clean
@@ -14,6 +40,9 @@ def compute_multikills(kills_df: pd.DataFrame, round_df: pd.DataFrame) -> dict:
     )
 
     multi = grouped[grouped["kills"] >= 3].copy()
+
+    if multi.empty:
+        return {"summary": pd.DataFrame(), "by_round": pd.DataFrame()}
 
     def label(k):
         if k >= 5: return "ACE"
@@ -46,20 +75,39 @@ def compute_opening_duels(kills_df: pd.DataFrame, round_df: pd.DataFrame) -> dic
         (kills_df["attacker_name"] != kills_df["user_name"])
     ].copy()
 
-    if "round" not in kills_clean.columns:
+    kills_clean = _add_round_col(kills_clean, round_df)
+
+    if kills_clean.empty or "round" not in kills_clean.columns:
         return {"per_round": pd.DataFrame(), "summary": pd.DataFrame()}
+
+    team_col = None
+    for candidate in ["attacker_team_name", "attacker_team", "team_name"]:
+        if candidate in kills_clean.columns:
+            team_col = candidate
+            break
+
+    select_cols = ["round", "attacker_name", "user_name", "tick"]
+    if team_col:
+        select_cols.append(team_col)
 
     first_kills = (
         kills_clean
         .sort_values("tick")
         .groupby("round")
         .first()
-        .reset_index()[["round", "attacker_name", "user_name", "attacker_team_name", "tick"]]
+        .reset_index()[select_cols]
     )
-    first_kills.columns = ["round", "opener", "victim", "opener_team", "tick"]
+
+    if team_col:
+        first_kills = first_kills.rename(columns={
+            "attacker_name": "opener", "user_name": "victim", team_col: "opener_team"
+        })
+    else:
+        first_kills = first_kills.rename(columns={"attacker_name": "opener", "user_name": "victim"})
+        first_kills["opener_team"] = None
 
     round_winners = round_df[round_df["round"] > 0].set_index("round")["winner"].to_dict()
-    first_kills["round_winner"] = first_kills["round"].map(round_winners)
+    first_kills["round_winner"]    = first_kills["round"].map(round_winners)
     first_kills["opener_won_round"] = first_kills["opener_team"] == first_kills["round_winner"]
 
     open_kills = first_kills.groupby("opener").agg(
@@ -73,11 +121,11 @@ def compute_opening_duels(kills_df: pd.DataFrame, round_df: pd.DataFrame) -> dic
     ).rename_axis("Player")
 
     summary = open_kills.join(open_deaths, how="outer").fillna(0)
-    summary["opens"]          = summary["opens"].astype(int)
-    summary["open_deaths"]    = summary["open_deaths"].astype(int)
-    summary["open_round_wins"]= summary["open_round_wins"].astype(int)
-    summary["open_win_rate"]  = summary["open_win_rate"].fillna(0)
-    summary["rating"]         = (summary["opens"] - summary["open_deaths"])
+    summary["opens"]           = summary["opens"].astype(int)
+    summary["open_deaths"]     = summary["open_deaths"].astype(int)
+    summary["open_round_wins"] = summary["open_round_wins"].astype(int)
+    summary["open_win_rate"]   = summary["open_win_rate"].fillna(0)
+    summary["rating"]          = summary["opens"] - summary["open_deaths"]
     summary = summary.sort_values("opens", ascending=False)
 
     return {"per_round": first_kills, "summary": summary}
@@ -91,20 +139,32 @@ def compute_clutches(kills_df: pd.DataFrame, round_df: pd.DataFrame,
         (kills_df["attacker_name"] != kills_df["user_name"])
     ].copy()
 
-    if "round" not in kills_clean.columns or spawn_df.empty:
+    kills_clean = _add_round_col(kills_clean, round_df)
+
+    if kills_clean.empty or spawn_df.empty:
         return {"clutches": pd.DataFrame(), "summary": pd.DataFrame()}
 
-    round_winners = round_df[round_df["round"] > 0].set_index("round")["winner"].to_dict()
+    spawn_col = None
+    for candidate in ["player_name", "user_name", "name"]:
+        if candidate in spawn_df.columns:
+            spawn_col = candidate
+            break
 
-    spawn_col = "player_name" if "player_name" in spawn_df.columns else \
-                "user_name"   if "user_name"   in spawn_df.columns else None
+    team_col = None
+    for candidate in ["team_name", "team"]:
+        if candidate in spawn_df.columns:
+            team_col = candidate
+            break
 
-    if spawn_col is None:
+    round_col_spawn = "round" if "round" in spawn_df.columns else None
+
+    if spawn_col is None or team_col is None or round_col_spawn is None:
         return {"clutches": pd.DataFrame(), "summary": pd.DataFrame()}
 
-    spawns = spawn_df[[spawn_col, "team_name", "round"]].dropna()
+    spawns = spawn_df[[spawn_col, team_col, round_col_spawn]].dropna().copy()
     spawns.columns = ["player", "team", "round"]
 
+    round_winners = round_df[round_df["round"] > 0].set_index("round")["winner"].to_dict()
     clutch_records = []
 
     for rnd, rnd_kills in kills_clean.groupby("round"):
@@ -122,33 +182,31 @@ def compute_clutches(kills_df: pd.DataFrame, round_df: pd.DataFrame,
         }
 
         for _, kill in rnd_kills.sort_values("tick").iterrows():
-            attacker = kill["attacker_name"]
-            victim   = kill["user_name"]
-
+            victim = kill["user_name"]
             for team_set in alive.values():
                 team_set.discard(victim)
 
-            teams = list(alive.keys())
+            teams = [t for t, s in alive.items() if len(s) > 0]
             if len(teams) < 2:
                 break
 
-            for i, team_a in enumerate(teams):
-                team_b = teams[1 - i]
-                if len(alive[team_a]) == 1 and len(alive[team_b]) >= 2:
-                    clutch_player = next(iter(alive[team_a]))
-                    vs_count      = len(alive[team_b])
-                    player_team_name = rnd_spawns[rnd_spawns["player"] == clutch_player]["team"].values
-                    if len(player_team_name) == 0:
+            for team_a in teams:
+                others = [t for t in teams if t != team_a]
+                other_count = sum(len(alive[t]) for t in others)
+                if len(alive[team_a]) == 1 and other_count >= 2:
+                    clutch_player    = next(iter(alive[team_a]))
+                    player_team_rows = rnd_spawns[rnd_spawns["player"] == clutch_player]["team"].values
+                    if len(player_team_rows) == 0:
                         break
-                    won = (player_team_name[0] == winner)
+                    won = (player_team_rows[0] == winner)
                     clutch_records.append({
                         "round":  rnd,
                         "player": clutch_player,
-                        "team":   player_team_name[0],
-                        "vs":     vs_count,
+                        "team":   player_team_rows[0],
+                        "vs":     other_count,
                         "won":    won,
                     })
-                    break  
+                    break
 
     if not clutch_records:
         return {"clutches": pd.DataFrame(), "summary": pd.DataFrame()}
@@ -182,8 +240,11 @@ def compute_weapon_stats(kills_df: pd.DataFrame) -> dict:
         (kills_df["attacker_name"] != kills_df["user_name"])
     ].copy()
 
-    weapon_col = "weapon" if "weapon" in kills_clean.columns else \
-                 "weapon_name" if "weapon_name" in kills_clean.columns else None
+    weapon_col = None
+    for candidate in ["weapon", "weapon_name"]:
+        if candidate in kills_clean.columns:
+            weapon_col = candidate
+            break
 
     if weapon_col is None:
         return {"by_weapon": pd.DataFrame(), "by_player": {}}
